@@ -311,7 +311,7 @@ def binDataFunc(redshiftVector, numBins, maxRedshift = 1.5):
 
 
 def norm_x_vals(x_vals_train, x_vals_test):
-    """Normalise x_vals, based on the training sample. 
+    """Normalise x_vals, based on the training sample..
 
     Args:
         x_vals_train (np.array): x_vals training sample
@@ -353,5 +353,6 @@ from gain_utils import rmse_loss
 impute = KNNImputer(n_neighbors=2)
 impute.fit(x_vals_train)
 x_vals_test_blank = impute.transform(x_vals_test_blank)
-
+# Does this work?
 print(rmse_loss(x_vals_test,x_vals_test_blank, mask))
+This will break things. 

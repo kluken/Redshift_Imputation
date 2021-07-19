@@ -353,6 +353,5 @@ from gain_utils import rmse_loss
 impute = KNNImputer(n_neighbors=2)
 impute.fit(x_vals_train)
 x_vals_test_blank = impute.transform(x_vals_test_blank)
-# Does this work?
+
 print(rmse_loss(x_vals_test,x_vals_test_blank, mask))
-This will break things. 

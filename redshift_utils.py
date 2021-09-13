@@ -172,7 +172,7 @@ def plot_data(spec_z, pred_z, file_name=None, error = None, kVal = None):
         plt.show()
 
 
-def kNN(kVal, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
+def kNN(k_val, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
     """Run kNN regression
 
     Args:
@@ -188,12 +188,40 @@ def kNN(kVal, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
         float: R^2 Coefficient of Determination. 
     """
     if distType < 5:
-        neigh = KNeighborsRegressor(n_neighbors=kVal, p=distType)
+        neigh = KNeighborsRegressor(n_neighbors=k_val, p=distType)
     elif distType == 99:   
-        neigh = KNeighborsRegressor(n_neighbors=kVal, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain, rowvar=False)})
-    neigh.fit(xValsTrain,np.squeeze(yValsTrain))
-    predictions = neigh.predict(xValsTest)
+        neigh = KNeighborsRegressor(n_neighbors=k_val, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain.astype(np.float64), rowvar=False)})
+    neigh.fit(xValsTrain.astype(np.float64),np.squeeze(yValsTrain).astype(np.float64))
+    predictions = neigh.predict(xValsTest.astype(np.float64))
+        
     return predictions.ravel(), neigh.score(xValsTest,np.squeeze(yValsTest))
+
+def kNN_cross_val(k_range, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
+    """Run kNN regression
+
+    Args:
+        kVal (int): Value to use as k for kNN
+        xValsTrain (np.array): 2-d np.array holding the photometry used for training
+        xValsTest (np.array): 2-d np.array holding the photometry used for testing
+        yValsTrain (np.array): 1-d np.array holding the measured redshift for training
+        yValsTest (np.array): 1-d np.array holding the measured redshift for testing
+        distType ([type]): Integer used to determine the distance metric. If less than 5, minkowski distance used. If more, mahalanobis. 
+
+    Returns:
+        np.array: 1-d np.array holding the predictions
+        float: R^2 Coefficient of Determination. 
+    """
+    out_rate = []
+    for k in k_range():
+        if distType < 5:
+            neigh = KNeighborsRegressor(n_neighbors=k, p=distType)
+        elif distType == 99:   
+            neigh = KNeighborsRegressor(n_neighbors=k, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain.astype(np.float64), rowvar=False)})
+        neigh.fit(xValsTrain.astype(np.float64),np.squeeze(yValsTrain).astype(np.float64))
+        predictions = neigh.predict(xValsTest.astype(np.float64))
+        out_rate.append(outlier_rate(norm_residual(yValsTest, predictions)))
+        
+    return k_range[np.argmin(out_rate)]
 
 
 def kNN_classification(kVal, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
@@ -214,13 +242,41 @@ def kNN_classification(kVal, xValsTrain, xValsTest, yValsTrain, yValsTest, distT
     if distType < 5:
         neigh = KNeighborsClassifier(n_neighbors = kVal, p = distType)
     elif distType == 99:
-        neigh = KNeighborsClassifier(n_neighbors = kVal, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain, rowvar=False)})
-    neigh.fit(xValsTrain,np.squeeze(yValsTrain.astype(str)))
-    predictions = neigh.predict(xValsTest.astype(str))
-    return predictions.astype(np.float32).ravel(), neigh.score(xValsTest,np.squeeze(yValsTest.astype(str))).astype(np.float32)
+        neigh = KNeighborsClassifier(n_neighbors = kVal, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain.astype(np.float64), rowvar=False)})
+    neigh.fit(xValsTrain.astype(np.float64),np.squeeze(yValsTrain).astype(str))
+    predictions = neigh.predict(xValsTest.astype(np.float64))
+    return predictions.astype(np.float64).ravel(), neigh.score(xValsTest.astype(np.float64),np.squeeze(yValsTest).astype(str)).astype(np.float64)
 
 
-def randomForestRegress(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState=None):
+def kNN_classification_cross_val(k_range, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
+    """Run kNN classification. 
+
+    Args:
+        kVal (int): Value to use as k for kNN
+        xValsTrain (np.array): 2-d np.array holding the photometry used for training
+        xValsTest (np.array): 2-d np.array holding the photometry used for testing
+        yValsTrain (np.array): 1-d np.array holding the measured redshift for training
+        yValsTest (np.array): 1-d np.array holding the measured redshift for testing
+        distType ([type]): Integer used to determine the distance metric. If less than 5, minkowski distance used. If more, mahalanobis. 
+
+    Returns:
+        np.array: 1-d np.array holding the predictions
+        float: accuracy of the predictions
+    """
+    out_rate = []
+    for k in k_range():
+        if distType < 5:
+            neigh = KNeighborsClassifier(n_neighbors=k, p=distType)
+        elif distType == 99:   
+            neigh = KNeighborsClassifier(n_neighbors=k, metric = "mahalanobis", metric_params={"V":np.cov(xValsTrain, rowvar=False)})
+        neigh.fit(xValsTrain,np.squeeze(yValsTrain))
+        predictions = neigh.predict(xValsTest)
+        out_rate.append(outlier_rate(norm_residual(yValsTest, predictions)))
+        
+    return k_range[np.argmin(out_rate)]
+
+
+def random_forest_regress(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState=None):
     """Run random forest regression
 
     Args:
@@ -238,12 +294,39 @@ def randomForestRegress(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, r
     if randomState is None:
         randomState = 42
     neigh = RandomForestRegressor(treeVal, random_state=randomState)
-    neigh.fit(xValsTrain,np.squeeze(yValsTrain))
-    predictions = neigh.predict(xValsTest)
-    return predictions.ravel(), neigh.score(xValsTest,np.squeeze(yValsTest))
+    neigh.fit(xValsTrain.astype(np.float64),np.squeeze(yValsTrain).astype(np.float64))
+    predictions = neigh.predict(xValsTest.astype(np.float64))
+    return predictions.ravel(), neigh.score(xValsTest.astype(np.float64),np.squeeze(yValsTest).astype(np.float64))
 
 
-def randomForestClass(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState = None):
+def random_forest_regress_cross_val(tree_range, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState=None):
+    """Run random forest regression
+
+    Args:
+        treeVal (Integer): Number of trees to use in classififcation
+        xValsTrain (np.array): 2-d numpy array holding the training photometry
+        xValsTest (np.array): 2-d numpy array holding the testing photometry
+        yValsTrain (np.array): 1-d numpy array holding the training redshifts
+        yValsTest (np.array): 1-d numpy array holding the test redshifts
+        randomState (bool or integer, optional): If nothing given, defaults to 42. Otherwise, sets the random state. Defaults to False.
+
+    Returns:
+        np.array: 1-d np.array holding the predictions
+        float: R^2 Coefficient of Determination. 
+    """
+    out_rate = []
+    for tree in tree_range():
+        if randomState is None:         
+            randomState = 42        
+        neigh = RandomForestRegressor(tree, random_state=randomState)
+        neigh.fit(xValsTrain,np.squeeze(yValsTrain.astype(str)))
+        predictions = neigh.predict(xValsTest.astype(str))
+        out_rate.append(outlier_rate(norm_residual(yValsTest, predictions)))
+        
+    return tree_range[np.argmin(out_rate)]
+
+
+def random_forest_class(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState = None):
     """Run Random Forest Classification
 
     Args:
@@ -261,11 +344,38 @@ def randomForestClass(treeVal, xValsTrain, xValsTest, yValsTrain, yValsTest, ran
     if randomState is None:
         randomState = 42
     neigh = RandomForestClassifier(treeVal, random_state=randomState)
-    neigh.fit(xValsTrain,np.squeeze(yValsTrain.astype(str)))
+    neigh.fit(xValsTrain.astype(np.float64),np.squeeze(yValsTrain.astype(str)))
     predictions = neigh.predict(xValsTest.astype(str))
-    return predictions.astype(np.float32).ravel(), neigh.score(xValsTest,np.squeeze(yValsTest.astype(str))).astype(np.float32)
+    return predictions.astype(np.float64).ravel(), neigh.score(xValsTest.astype(np.float64),np.squeeze(yValsTest.astype(str))).astype(np.float64)
 
-def binDataFunc(redshiftVector, numBins, maxRedshift = 1.5):
+
+def random_forest_class_cross_val(tree_range, xValsTrain, xValsTest, yValsTrain, yValsTest, randomState = None):
+    """Run Random Forest Classification
+
+    Args:
+        treeVal (Integer): Number of trees to use in classififcation
+        xValsTrain (np.array): 2-d numpy array holding the training photometry
+        xValsTest (np.array): 2-d numpy array holding the testing photometry
+        yValsTrain (np.array): 1-d numpy array holding the training redshifts
+        yValsTest (np.array): 1-d numpy array holding the test redshifts
+        randomState (bool or integer, optional): If nothing given, defaults to 42. Otherwise, sets the random state. Defaults to False.
+
+    Returns:
+        np.array: Predicted redshifts. 
+        float: Prediction accuracies
+    """
+    out_rate = []
+    for tree in tree_range():
+        if randomState is None:         
+            randomState = 42        
+        neigh = RandomForestClassifier(tree, random_state=randomState)
+        neigh.fit(xValsTrain,np.squeeze(yValsTrain.astype(str)))
+        predictions = neigh.predict(xValsTest.astype(str))
+        out_rate.append(outlier_rate(norm_residual(yValsTest, predictions)))
+        
+    return tree_range[np.argmin(out_rate)]
+
+def bin_data_func(redshiftVector, numBins, maxRedshift = 1.5):
     """Function to bin the data
 
     Args:
@@ -331,27 +441,45 @@ def norm_x_vals(x_vals_train, x_vals_test):
 
     return x_vals_train, x_vals_test, mean_norm, std_norm
 
+def simple_impute(x_vals, impute_func = np.nanmin, missing = -99):
+    """Impute missing values using a provided method
 
-data = read_fits("ATLAS_Complete.fits", ["z","Sp2","flux_ap2_36","flux_ap2_45","flux_ap2_58","flux_ap2_80","MAG_APER_4_G","MAG_APER_4_R","MAG_APER_4_I","MAG_APER_4_Z"])
+    Args:
+        x_vals (np.array): Array of missing values
+        impute_func (function, optional): Method to use for data imputation. Defaults to np.nanmin.
+        missing (int, optional): Value to use to determine missing values. Defaults to -99.
 
-from numpy.random import default_rng
-from sklearn.impute import KNNImputer
-rand_generator = default_rng(seed=42)
-x_vals = data[:,1:]
+    Returns:
+        np.array: Array with missing values imputed. 
+    """
+    x_vals_impute = impute_func(x_vals, axis=0)
+    for i in range(x_vals.shape[1]):
+        x_vals[np.where(np.isnan(x_vals[:, i])), i] = x_vals_impute[i]
+    return x_vals
 
-test_indices = rand_generator.integers(0, len(x_vals), size = round(len(x_vals)*(1-0.7)))
 
-train_indices = np.array(list(set(range(len(x_vals))) - set(test_indices)))
-x_vals_train = x_vals[train_indices]
-x_vals_test = x_vals[test_indices]
-print(x_vals_train.shape, x_vals_test.shape)
+# data = read_fits("ATLAS_Complete.fits", ["z","Sp2","flux_ap2_36","flux_ap2_45","flux_ap2_58","flux_ap2_80","MAG_APER_4_G","MAG_APER_4_R","MAG_APER_4_I","MAG_APER_4_Z"])
 
-from gain_utils import blank_data
-x_vals_test_blank, mask = blank_data(x_vals_test, 0.0001, rand_generator)
-from gain_utils import rmse_loss
+# from numpy.random import default_rng
+# from sklearn.impute import KNNImputer
+# rand_generator = default_rng(seed=42)
+# x_vals = data[:,1:]
 
-impute = KNNImputer(n_neighbors=2)
-impute.fit(x_vals_train)
-x_vals_test_blank = impute.transform(x_vals_test_blank)
+# test_indices = rand_generator.integers(0, len(x_vals), size = round(len(x_vals)*(1-0.7)))
 
-print(rmse_loss(x_vals_test,x_vals_test_blank, mask))
+# train_indices = np.array(list(set(range(len(x_vals))) - set(test_indices)))
+# x_vals_train = x_vals[train_indices]
+# x_vals_test = x_vals[test_indices]
+
+# from gain_utils import blank_data
+# x_vals_test_blank, mask = blank_data(x_vals_test, 0.5, rand_generator)
+
+# from gain_utils import rmse_loss
+
+# x_vals_test_blank = simple_impute(x_vals_test_blank, missing = np.nan, impute_func = np.nanmedian)
+
+# # impute = KNNImputer(n_neighbors=2)
+# # impute.fit(x_vals_train)
+# # x_vals_test_blank = impute.transform(x_vals_test_blank)
+
+# print(rmse_loss(x_vals_test,x_vals_test_blank, mask))

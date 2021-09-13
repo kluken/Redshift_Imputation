@@ -49,11 +49,12 @@ def normalization (data, parameters=None):
   else:
     min_val = parameters['min_val']
     max_val = parameters['max_val']
-    
     # For each dimension
-    for i in range(dim):
-      norm_data[:,i] = norm_data[:,i] - min_val[i]
-      norm_data[:,i] = norm_data[:,i] / (max_val[i] + 1e-6)  
+    # for i in range(dim):
+    #   norm_data[:,i] = norm_data[:,i] - min_val[i]
+    #   norm_data[:,i] = norm_data[:,i] / (max_val[i] + 1e-6)
+    norm_data = norm_data - min_val
+    norm_data = norm_data / (max_val + 1e-6)  
       
     norm_parameters = parameters    
       

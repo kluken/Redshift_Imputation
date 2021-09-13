@@ -19,7 +19,7 @@ from gain_utils import xavier_init
 from gain_utils import binary_sampler, uniform_sampler, sample_batch_index
 
 tf.disable_v2_behavior()
-def gain (data_x, gain_parameters, tqdm_disable=False):
+def gain (data_x, gain_parameters, rand_gen, tqdm_disable=False):
   '''Impute missing values in data_x
   
   Args:
@@ -41,6 +41,8 @@ def gain (data_x, gain_parameters, tqdm_disable=False):
   hint_rate = gain_parameters['hint_rate']
   alpha = gain_parameters['alpha']
   iterations = gain_parameters['iterations']
+
+  tf.set_random_seed(rand_gen.integers(314159265))
   
   # Other parameters
   no, dim = data_x.shape
@@ -143,13 +145,13 @@ def gain (data_x, gain_parameters, tqdm_disable=False):
   for it in tqdm(range(iterations), disable = tqdm_disable):    
       
     # Sample batch
-    batch_idx = sample_batch_index(no, batch_size)
+    batch_idx = sample_batch_index(no, batch_size, rand_gen)
     X_mb = norm_data_x[batch_idx, :]  
     M_mb = data_m[batch_idx, :]  
     # Sample random vectors  
-    Z_mb = uniform_sampler(0, 0.01, batch_size, dim) 
+    Z_mb = uniform_sampler(0, 0.01, batch_size, dim, rand_gen) 
     # Sample hint vectors
-    H_mb_temp = binary_sampler(hint_rate, batch_size, dim)
+    H_mb_temp = binary_sampler(hint_rate, batch_size, dim, rand_gen)
     H_mb = M_mb * H_mb_temp
       
     # Combine random vectors with observed vectors
@@ -162,7 +164,7 @@ def gain (data_x, gain_parameters, tqdm_disable=False):
              feed_dict = {X: X_mb, M: M_mb, H: H_mb})
             
   ## Return imputed data      
-  Z_mb = uniform_sampler(0, 0.01, no, dim) 
+  Z_mb = uniform_sampler(0, 0.01, no, dim, rand_gen) 
   M_mb = data_m
   X_mb = norm_data_x          
   X_mb = M_mb * X_mb + (1-M_mb) * Z_mb 

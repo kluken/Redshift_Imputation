@@ -31,10 +31,13 @@ class BaseMICE:
             DataFrame with imputed missing values.
         """
         nan_ids = np.argwhere(df.isna().values).tolist()
+        columns_missing = df.isna().sum()
+        columns_missing = columns_missing[columns_missing > 0]
         df_imputed = self.impute_initial_mean_or_mode(df)
         iter_results = []
         for iter in range(self.max_iter):
-            df_imputed = self.transform(df_imputed, nan_ids, iter)
+            df_imputed = self.transform(df_imputed, columns_missing, nan_ids, iter)
+            # df: pd.DataFrame, columns_missing: list, nan_ids: list, iter_id: int
         return df_imputed
     
     def benchmark(self, df_original, df_missing, drop_columns_loss=None):
@@ -158,15 +161,18 @@ class FastMICE(BaseMICE):
     
     def transform(self, df: pd.DataFrame, columns_missing: list, nan_ids: list, iter_id: int):
         rand_column_ids = self.rand_generator.permutation(len(columns_missing)).tolist()
+      
         for column_id in tqdm(rand_column_ids, desc=f"{self.method_name}: Iter {iter_id + 1} / {self.max_iter}", position=0, disable=self.tqdm_disable):
             target_column_name = columns_missing.index[column_id]
             X = df.drop(columns=[target_column_name], axis=1)
             X = pd.get_dummies(X, drop_first=True)
             y = df[target_column_name]
             column_nan_ids = [id[0] for id in nan_ids if id[1] == column_id]
-            
             # Fit model
-            model = self.get_model(y).fit(X.drop(index=column_nan_ids), y.drop(index=column_nan_ids))
+            tempX = X.drop(index=column_nan_ids)
+            tempY = y.drop(index=column_nan_ids)
+            tempModel = self.get_model(y)
+            model = tempModel.fit(tempX, tempY)
             
             # Predict value
             df.iloc[column_nan_ids, column_id] = model.predict(X.iloc[column_nan_ids, :])

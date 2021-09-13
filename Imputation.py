@@ -55,9 +55,15 @@ def main():
     plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
     # Program Defaults:
-    # TODO: Make these arguments to be passed. 
+    parser = argparse.ArgumentParser(description="This script does stuff.")
+    parser.add_argument("-s", "--seed", nargs=1, required=True, type=int, help="Random Seed to use") 
+    parser.add_argument("-m", "--missingRate", nargs=1, required=True, type=float, help="Decimal value used to set the missing percentage") 
+    parser.add_argument("-t", "--tqdmDisable", action='store_true', help="Disable the TQDM bar") 
 
-    initial_rand_seed = 42 # argument
+    args = vars(parser.parse_args())
+
+
+    initial_rand_seed = args["seed"][0]  # argument
     initial_rand_gen = np.random.default_rng(initial_rand_seed) # Probably removed from this file and moved to a controller script
     split_data_seed = initial_rand_gen.integers(314159265) # Will be argument
     missing_data_seed = initial_rand_gen.integers(314159265) # Will be argument
@@ -65,15 +71,15 @@ def main():
     gain_seed = initial_rand_gen.integers(314159265) # Will be argument
     knn_seed = initial_rand_gen.integers(314159265) # Will be argument
     tree_seed = initial_rand_gen.integers(314159265) # Will be argument
-    missing_percentage = 0.02 # Will be argument, of values 2 5 10 15 20 25 30
+    missing_percentage = args["missingRate"][0] # Will be argument, of values 2 5 10 15 20 25 30
+    tqdm_disable_bool = args["tqdmDisable"]
     knn_distance = 99 # Mahalanobis. Can be swapped later if needed, but will probably stay. 1 for Manhattan, 2 for Euclidean, 99 for Mahalanobis
-    regression_test = True # Will be argument
-    outlier_fail_rate = 0.15 # Value to use for the Outlier Rate
     num_class_bins = 15 # Number of bins to use for classification if needed
     kfold_splits = 10 # Used in k-Fold Cross Validation.
     catalogue = "../Data/ATLAS_Complete_fixed.fits" # Dataset to start with use. Will probably be argument
     data_cols = ["z","Sp2","flux_ap2_36","flux_ap2_45","flux_ap2_58","flux_ap2_80","MAG_APER_4_G","MAG_APER_4_R","MAG_APER_4_I","MAG_APER_4_Z"] # Columns to use. Might be argument
-    k_range = np.arange(3, 33, 2)
+    k_range_reg = np.arange(3, 23)
+    k_range_class = np.arange(3, 43, 2)
     tree_range = np.arange(1, 61, 1)
 
 
@@ -81,24 +87,24 @@ def main():
     x_vals = full_dataset[:, 1:]
     y_vals = full_dataset[:,0]
 
-    y_vals_class, bin_edges, bin_median = bin_data_func(y_vals, num_class_bins)
-
     x_vals_train, x_vals_test, y_vals_train, y_vals_test = split_data(x_vals, y_vals, np.random.default_rng(split_data_seed))
+
+    y_vals_class, bin_edges, bin_median = bin_data_func(np.copy(y_vals), num_class_bins)
     _, _, y_vals_class_train, y_vals_class_test = split_data(x_vals, y_vals_class, np.random.default_rng(split_data_seed))
 
     x_vals_blank, missing_mask = blank_data(x_vals_test, missing_percentage, np.random.default_rng(missing_data_seed))
 
     x_vals_knn = np.copy(x_vals_blank)
     start_time = datetime.now()
-    x_vals_knn, knn_impute_k = kNN_impute(x_vals_knn, x_vals_train, np.random.default_rng(knn_seed), missing_percentage)
-    knn_time = start_time - datetime.now()
+    x_vals_knn, knn_impute_k = kNN_impute(x_vals_knn, x_vals_train, np.random.default_rng(knn_seed), missing_percentage, tqdm_disable=tqdm_disable_bool)
+    knn_time = (datetime.now() - start_time)
     knn_rmse = rmse_loss(x_vals_test, x_vals_knn, missing_mask)
 
     start_time = datetime.now()
-    mice_obj = FastMICE(rand_generator=np.random.default_rng(mice_seed), tqdm_disable=False)
+    mice_obj = FastMICE(rand_generator=np.random.default_rng(mice_seed), tqdm_disable=tqdm_disable_bool)
     x_vals_mice = pd.DataFrame(x_vals_blank)
     x_vals_mice = np.array(mice_obj.fill_missing_values(x_vals_mice))
-    mice_time = start_time - datetime.now()
+    mice_time = (datetime.now() - start_time)
     mice_rmse = rmse_loss(x_vals_test, x_vals_mice, missing_mask)
 
     gain_parset = {'batch_size': 128,
@@ -107,29 +113,35 @@ def main():
                     'iterations': 60000}
     start_time = datetime.now()
     #  Default gain parameters used by Rabina were: batch size = 128, hint rate = 0.9, alpha = 100, iterations = 60000.
-    x_vals_gain = gain(x_vals_blank, gain_parset, np.random.default_rng(gain_seed), tqdm_disable=False)
-    gain_time = datetime.now()
+    x_vals_gain = gain(x_vals_blank, gain_parset, np.random.default_rng(gain_seed), tqdm_disable=tqdm_disable_bool)
+    gain_time = (datetime.now() - start_time)
     gain_rmse = rmse_loss(x_vals_test, x_vals_gain, missing_mask)
     
 
     x_vals_mean = np.copy(x_vals_blank)
     start_time = datetime.now()
     x_vals_mean = simple_impute(x_vals_mean, np.nanmean, np.nan)
-    mean_time = start_time - datetime.now()
+    mean_time = (datetime.now() - start_time)
     mean_rmse = rmse_loss(x_vals_test, x_vals_mean, missing_mask)
 
 
     x_vals_min = np.copy(x_vals_blank)
     start_time = datetime.now()
     x_vals_min = simple_impute(x_vals_min, np.nanmin, np.nan)
-    min_time = start_time - datetime.now()
+    min_time = (datetime.now() - start_time)
     min_rmse = rmse_loss(x_vals_test, x_vals_min, missing_mask)
 
     x_vals_max = np.copy(x_vals_blank)
     start_time = datetime.now()
     x_vals_max = simple_impute(x_vals_max, np.nanmax, np.nan)
-    max_time = start_time - datetime.now()
+    max_time = (datetime.now() - start_time)
     max_rmse = rmse_loss(x_vals_test, x_vals_max, missing_mask)
+
+    x_vals_median = np.copy(x_vals_blank)
+    start_time = datetime.now()
+    x_vals_median = simple_impute(x_vals_median, np.nanmedian, np.nan)
+    median_time = (datetime.now() - start_time)
+    median_rmse = rmse_loss(x_vals_test, x_vals_median, missing_mask)
 
 
 
@@ -143,7 +155,7 @@ def main():
     mse_random_regress = []
     acc_random_class = []
 
-    for k in tqdm(k_range):
+    for i in tqdm(range(len(k_range_reg)), disable=tqdm_disable_bool):
         #setup arrays
         outrate_cross_regress = []
         mse_cross_regress = []
@@ -165,10 +177,10 @@ def main():
             x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_cross_train, x_vals_cross_test)
 
             #predict y_vals for regression
-            pred_reg, mse_reg = kNN(k, x_vals_train_norm, x_vals_test_norm, y_vals_cross_train, y_vals_cross_test, knn_distance)
+            pred_reg, mse_reg = kNN(k_range_reg[i], x_vals_train_norm, x_vals_test_norm, y_vals_cross_train, y_vals_cross_test, knn_distance)
             
             #predict y_vals for classification
-            pred_class, acc_class = kNN_classification(k, x_vals_train_norm, x_vals_test_norm, y_vals_cross_train_class, y_vals_cross_test_class, knn_distance)
+            pred_class, acc_class = kNN_classification(k_range_class[i], x_vals_train_norm, x_vals_test_norm, y_vals_cross_train_class, y_vals_cross_test_class, knn_distance)
 
             #calculate outlier_rate
             reg_outlier = outlier_rate(norm_residual(y_vals_cross_test, pred_reg))
@@ -187,7 +199,7 @@ def main():
         acc_knn_class.append(np.mean(accuracy_cross_class))
 
     tree_rand_gen = np.random.default_rng(tree_seed)
-    for tree in tqdm(tree_range):
+    for tree in tqdm(tree_range, disable=tqdm_disable_bool):
         #setup arrays
         outrate_cross_regress = []
         mse_cross_regress = []
@@ -233,8 +245,8 @@ def main():
         mse_random_regress.append(np.mean(mse_cross_regress))
         acc_random_class.append(np.mean(accuracy_cross_class))
 
-    best_k_reg = k_range[np.argmin(outlier_knn_regress)]
-    best_k_class = k_range[np.argmin(outlier_knn_class)]
+    best_k_reg = k_range_reg[np.argmin(outlier_knn_regress)]
+    best_k_class = k_range_class[np.argmin(outlier_knn_class)]
     best_tree_reg = tree_range[np.argmin(outlier_random_regress)]
     best_tree_class =  tree_range[np.argmin(outlier_random_class)]
 
@@ -243,57 +255,206 @@ def main():
     # knn regression
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_knn)
     pred_reg_knn_knn, mse_reg_knn_knn = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_knn, mse_class_knn_knn = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_knn, mse_class_knn_knn = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_knn, mse_reg_rf_knn = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_knn, mse_class_rf_knn = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_knn, mse_class_rf_knn = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
 
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_mice)
     pred_reg_knn_mice, mse_reg_knn_mice = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_mice, mse_class_knn_mice = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_mice, mse_class_knn_mice = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_mice, mse_reg_rf_mice = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_mice, mse_class_rf_mice = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_mice, mse_class_rf_mice = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
 
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_gain)
     pred_reg_knn_gain, mse_reg_knn_gain = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_gain, mse_class_knn_gain = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_gain, mse_class_knn_gain = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_gain, mse_reg_rf_gain = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_gain, mse_class_rf_gain = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_gain, mse_class_rf_gain = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
+
+    x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_median)
+    pred_reg_knn_median, mse_reg_knn_median = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_median, mse_class_knn_median = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
+    pred_reg_rf_median, mse_reg_rf_median = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_median, mse_class_rf_median = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
 
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_mean)
     pred_reg_knn_mean, mse_reg_knn_mean = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_mean, mse_class_knn_mean = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_mean, mse_class_knn_mean = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_mean, mse_reg_rf_mean = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_mean, mse_class_rf_mean = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_mean, mse_class_rf_mean = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
 
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_min)
     pred_reg_knn_min, mse_reg_knn_min = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_min, mse_class_knn_min = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_min, mse_class_knn_min = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_min, mse_reg_rf_min = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_min, mse_class_rf_min = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_min, mse_class_rf_min = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
 
     x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_max)
     pred_reg_knn_max, mse_reg_knn_max = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
-    pred_class_knn_max, mse_class_knn_max = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_max, mse_class_knn_max = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
     pred_reg_rf_max, mse_reg_rf_max = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
-    pred_class_rf_max, mse_class_rf_max = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_max, mse_class_rf_max = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
     
     print(datetime.now() - starting_time)
 
-    """
-    Loop - 10 (100?) iterations, using different random seeds to split data 70/30. Loop structure isn't actually implemented - this would be part of the multiprocessing section
-        Blank X% of test data
-        if classification - bin  redshift data
-        Impute with all methods, giving 5-6 test sets
+    # Calculate outlier rates
+    outlier_reg_knn_knn = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_knn))
+    outlier_class_knn_knn = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_knn))
+    outlier_reg_rf_knn = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_knn))
+    outlier_class_rf_knn = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_knn))
 
-        Loop - 10 fold cross validation 
-            Optimise parameters - k for knn or trees for rf
-            Predict!
+    outlier_reg_knn_mice = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_mice))
+    outlier_class_knn_mice = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_mice))
+    outlier_reg_rf_mice = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_mice))
+    outlier_class_rf_mice = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_mice))
 
+    outlier_reg_knn_gain = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_gain))
+    outlier_class_knn_gain = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_gain))
+    outlier_reg_rf_gain = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_gain))
+    outlier_class_rf_gain = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_gain))
 
+    outlier_reg_knn_mean = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_mean))
+    outlier_class_knn_mean = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_mean))
+    outlier_reg_rf_mean = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_mean))
+    outlier_class_rf_mean = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_mean))
 
+    outlier_reg_knn_median = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_median))
+    outlier_class_knn_median = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_median))
+    outlier_reg_rf_median = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_median))
+    outlier_class_rf_median = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_median))
 
-    """
+    outlier_reg_knn_min = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_min))
+    outlier_class_knn_min = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_min))
+    outlier_reg_rf_min = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_min))
+    outlier_class_rf_min = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_min))
 
+    outlier_reg_knn_max = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_max))
+    outlier_class_knn_max = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_max))
+    outlier_reg_rf_max = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_max))
+    outlier_class_rf_max = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_max))
+
+    # Compile error data frame
+    # Fill Method, FillKVal, FillTime, FillRMSE, Prediction Method, k/tree_val, Class/Regress, Out_Rate, MSE/Acc
+    error_lists = [['kNN', knn_impute_k, knn_time, knn_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_knn, mse_reg_knn_knn], 
+        ['MICE', "", mice_time, mice_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mice, mse_reg_knn_mice],  
+        ['GAIN', "", gain_time, gain_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_gain, mse_reg_knn_gain],  
+        ['Mean', "", mean_time, mean_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mean, mse_reg_knn_mean],  
+        ['Median', "", median_time, median_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_median, mse_reg_knn_median],  
+        ['Min', "", min_time, min_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_min, mse_reg_knn_min],  
+        ['Max', "", max_time, max_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_max, mse_reg_knn_max],  
+
+        ['kNN', knn_impute_k, knn_time, knn_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_knn, mse_class_knn_knn],  
+        ['MICE', "", mice_time, mice_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mice, mse_class_knn_mice],  
+        ['GAIN', "", gain_time, gain_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_gain, mse_class_knn_gain],  
+        ['Mean', "", mean_time, mean_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mean, mse_class_knn_mean],  
+        ['Median', "", median_time, median_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_median, mse_class_knn_median],  
+        ['Min', "", min_time, min_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_min, mse_class_knn_min],  
+        ['Max', "", max_time, max_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_max, mse_class_knn_max], 
+
+        ['kNN', knn_impute_k, knn_time, knn_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_knn, mse_reg_rf_knn],  
+        ['MICE', "", mice_time, mice_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mice, mse_reg_rf_mice],  
+        ['GAIN', "", gain_time, gain_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_gain, mse_reg_rf_gain],  
+        ['Mean', "", mean_time, mean_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mean, mse_reg_rf_mean],  
+        ['Median', "", median_time, median_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_median, mse_reg_rf_median],  
+        ['Min', "", min_time, min_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_min, mse_reg_rf_min],  
+        ['Max', "", max_time, max_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_max, mse_reg_rf_max],
+
+        ['kNN', knn_impute_k, knn_time, knn_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_knn, mse_class_rf_knn],  
+        ['MICE', "", mice_time, mice_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mice, mse_class_rf_mice],  
+        ['GAIN', "", gain_time, gain_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_gain, mse_class_rf_gain],  
+        ['Mean', "", mean_time, mean_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mean, mse_class_rf_mean],  
+        ['Median', "", median_time, median_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_median, mse_class_rf_median],  
+        ['Min', "", min_time, min_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_min, mse_class_rf_min],  
+        ['Max', "", max_time, max_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_max, mse_class_rf_max]]
+
+    error_frame = pd.DataFrame(error_lists, columns=["FillMethod", "FillKVal", "FillTime", "FillRMSE", "PredictMethod", "BestK_TreeVal", "Class/Regress", "OutlierRate", "MSE/Accuracy"])
+    
+    startTime = datetime.now()
+    perc_folder = "Missing_Rate-" + str(missing_percentage)
+    if not os.path.exists("Results"):
+        os.makedirs("Results")
+    os.chdir("Results")
+    if not os.path.exists(perc_folder):
+        os.makedirs(perc_folder)
+    os.chdir(perc_folder)
+    folderpath = startTime.strftime("%d-%m-%Y_%H-%M-%S") + "_Seed-" + str(initial_rand_seed)   
+    if not os.path.exists(folderpath):
+        os.makedirs(folderpath)
+    os.chdir(folderpath)
+    
+    error_frame.to_csv("summary.csv", index=False)
+    np.savetxt('y_vals_test.csv', y_vals_test, fmt="%f", delimiter=",")
+    np.savetxt('y_vals_class_test.csv', y_vals_class_test, fmt="%f", delimiter=",")
+
+    np.savetxt('pred_reg_knn_knn.csv', pred_reg_knn_knn, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_knn.csv', pred_class_knn_knn, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_knn.csv', pred_reg_rf_knn, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_knn.csv', pred_class_rf_knn, fmt="%f", delimiter=",")
+
+    plot_data(y_vals_test, pred_reg_knn_knn, file_name="pred_reg_knn_knn.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_knn, file_name="pred_class_knn_knn.pdf")
+    plot_data(y_vals_test, pred_reg_rf_knn, file_name="pred_reg_rf_knn.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_knn, file_name="pred_class_rf_knn.pdf")
+
+    np.savetxt('pred_reg_knn_mice.csv', pred_reg_knn_mice, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_mice.csv', pred_class_knn_mice, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_mice.csv', pred_reg_rf_mice, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_mice.csv', pred_class_rf_mice, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_mice, file_name="pred_reg_knn_mice.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_mice, file_name="pred_class_knn_mice.pdf")
+    plot_data(y_vals_test, pred_reg_rf_mice, file_name="pred_reg_rf_mice.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_mice, file_name="pred_class_rf_mice.pdf")
+
+    np.savetxt('pred_reg_knn_gain.csv', pred_reg_knn_gain, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_gain.csv', pred_class_knn_gain, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_gain.csv', pred_reg_rf_gain, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_gain.csv', pred_class_rf_gain, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_gain, file_name="pred_reg_knn_gain.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_gain, file_name="pred_class_knn_gain.pdf")
+    plot_data(y_vals_test, pred_reg_rf_gain, file_name="pred_reg_rf_gain.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_gain, file_name="pred_class_rf_gain.pdf")
+
+    np.savetxt('pred_reg_knn_mean.csv', pred_reg_knn_mean, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_mean.csv', pred_class_knn_mean, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_mean.csv', pred_reg_rf_mean, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_mean.csv', pred_class_rf_mean, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_mean, file_name="pred_reg_knn_mean.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_mean, file_name="pred_class_knn_mean.pdf")
+    plot_data(y_vals_test, pred_reg_rf_mean, file_name="pred_reg_rf_mean.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_mean, file_name="pred_class_rf_mean.pdf")
+
+    np.savetxt('pred_reg_knn_median.csv', pred_reg_knn_median, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_median.csv', pred_class_knn_median, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_median.csv', pred_reg_rf_median, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_median.csv', pred_class_rf_median, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_median, file_name="pred_reg_knn_median.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_median, file_name="pred_class_knn_median.pdf")
+    plot_data(y_vals_test, pred_reg_rf_median, file_name="pred_reg_rf_median.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_median, file_name="pred_class_rf_median.pdf")
+
+    np.savetxt('pred_reg_knn_min.csv', pred_reg_knn_min, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_min.csv', pred_class_knn_min, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_min.csv', pred_reg_rf_min, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_min.csv', pred_class_rf_min, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_min, file_name="pred_reg_knn_min.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_min, file_name="pred_class_knn_min.pdf")
+    plot_data(y_vals_test, pred_reg_rf_min, file_name="pred_reg_rf_min.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_min, file_name="pred_class_rf_min.pdf")
+
+    np.savetxt('pred_reg_knn_max.csv', pred_reg_knn_max, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_max.csv', pred_class_knn_max, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_max.csv', pred_reg_rf_max, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_max.csv', pred_class_rf_max, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_max, file_name="pred_reg_knn_max.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_max, file_name="pred_class_knn_max.pdf")
+    plot_data(y_vals_test, pred_reg_rf_max, file_name="pred_reg_rf_max.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_max, file_name="pred_class_rf_max.pdf")
 
 
 if __name__ == "__main__":

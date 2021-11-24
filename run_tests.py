@@ -3,13 +3,16 @@ import os
 import numpy as np
 
 missing_rates = [0.02, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3]
+# missing_rates = [0.3]
 rand_gen = np.random.default_rng(42)
 tests = []
 
 for miss_rate in missing_rates:
     for i in range(101):
         random_seed = rand_gen.integers(314159265)
-        test_string = "/home/kluken/anaconda3/envs/astro/bin/python Imputation.py -s " + str(random_seed) + " -m " + str(miss_rate) + " -t"
+        test_string = "C:\\Users\\Robin\\anaconda3\\envs\\nips2021\\python.exe Imputation.py -s " + str(random_seed) + " -m " + str(miss_rate) + " -t"
+        #test_string = "/home/kluken/anaconda3/envs/astro/bin/python Imputation.py -s " + str(random_seed) + " -m " + str(miss_rate) + " -t"
+        # print(test_string)
         tests.append(test_string)
 
 def processTests(test):

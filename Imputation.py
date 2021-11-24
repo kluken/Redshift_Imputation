@@ -1,15 +1,11 @@
-import sys, argparse, pickle, os
+import argparse, os
 from datetime import datetime
 
 import numpy as np
 import matplotlib.pyplot as plt
-from astropy.io import fits
 from tqdm import tqdm
 
 from sklearn.model_selection import KFold 
-from sklearn.metrics import confusion_matrix, adjusted_mutual_info_score
-from sklearn.neighbors import KNeighborsRegressor, KNeighborsClassifier
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from redshift_utils import *
 from gain_utils import blank_data
 from gain_utils import rmse_loss
@@ -64,20 +60,20 @@ def main():
 
 
     initial_rand_seed = args["seed"][0]  # argument
-    initial_rand_gen = np.random.default_rng(initial_rand_seed) # Probably removed from this file and moved to a controller script
-    split_data_seed = initial_rand_gen.integers(314159265) # Will be argument
-    missing_data_seed = initial_rand_gen.integers(314159265) # Will be argument
-    mice_seed = initial_rand_gen.integers(314159265) # Will be argument
-    gain_seed = initial_rand_gen.integers(314159265) # Will be argument
-    knn_seed = initial_rand_gen.integers(314159265) # Will be argument
-    tree_seed = initial_rand_gen.integers(314159265) # Will be argument
-    missing_percentage = args["missingRate"][0] # Will be argument, of values 2 5 10 15 20 25 30
-    tqdm_disable_bool = args["tqdmDisable"]
+    initial_rand_gen = np.random.default_rng(initial_rand_seed) # Initial Random Generator to use
+    split_data_seed = initial_rand_gen.integers(314159265) # Generate random seed to use to split data
+    missing_data_seed = initial_rand_gen.integers(314159265) # Generate random seed to use to determine missing data
+    mice_seed = initial_rand_gen.integers(314159265) # Generate random seed to use within MICE
+    gain_seed = initial_rand_gen.integers(314159265) # Generate random seed to use within GAIN
+    knn_seed = initial_rand_gen.integers(314159265) # Generate random seed to use for kNN cross-validation
+    tree_seed = initial_rand_gen.integers(314159265) # Generate random seed to use for Random Forest
+    missing_percentage = args["missingRate"][0] # Percentage of data to be set to missing, generally a value [2 5 10 15 20 25 30]
+    tqdm_disable_bool = args["tqdmDisable"] # Disable TQDM progress bars if running many
     knn_distance = 99 # Mahalanobis. Can be swapped later if needed, but will probably stay. 1 for Manhattan, 2 for Euclidean, 99 for Mahalanobis
     num_class_bins = 15 # Number of bins to use for classification if needed
     kfold_splits = 10 # Used in k-Fold Cross Validation.
-    catalogue = "../Data/ATLAS_Complete_fixed.fits" # Dataset to start with use. Will probably be argument
-    data_cols = ["z","Sp2","flux_ap2_36","flux_ap2_45","flux_ap2_58","flux_ap2_80","MAG_APER_4_G","MAG_APER_4_R","MAG_APER_4_I","MAG_APER_4_Z"] # Columns to use. Might be argument
+    catalogue = "ATLAS_Complete_fixed.fits" # Dataset to use.
+    data_cols = ["z","Sp2","flux_ap2_36","flux_ap2_45","flux_ap2_58","flux_ap2_80","MAG_APER_4_G","MAG_APER_4_R","MAG_APER_4_I","MAG_APER_4_Z"] # Columns to use.
     k_range_reg = np.arange(3, 23)
     k_range_class = np.arange(3, 43, 2)
     tree_range = np.arange(1, 61, 1)
@@ -112,7 +108,7 @@ def main():
                     'alpha': 100,
                     'iterations': 60000}
     start_time = datetime.now()
-    #  Default gain parameters used by Rabina were: batch size = 128, hint rate = 0.9, alpha = 100, iterations = 60000.
+    
     x_vals_gain = gain(x_vals_blank, gain_parset, np.random.default_rng(gain_seed), tqdm_disable=tqdm_disable_bool)
     gain_time = (datetime.now() - start_time)
     gain_rmse = rmse_loss(x_vals_test, x_vals_gain, missing_mask)
@@ -295,6 +291,12 @@ def main():
     pred_reg_rf_max, mse_reg_rf_max = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
     pred_class_rf_max, mse_class_rf_max = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
     
+    x_vals_train_norm, x_vals_test_norm, _, _ = norm_x_vals(x_vals_train, x_vals_test)
+    pred_reg_knn_full, mse_reg_knn_full = kNN(best_k_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, knn_distance)
+    pred_class_knn_full, mse_class_knn_full = kNN_classification(best_k_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, knn_distance)
+    pred_reg_rf_full, mse_reg_rf_full = random_forest_regress(best_tree_reg, x_vals_train_norm, x_vals_test_norm, y_vals_train, y_vals_test, rf_seed)
+    pred_class_rf_full, mse_class_rf_full = random_forest_class(best_tree_class, x_vals_train_norm, x_vals_test_norm, y_vals_class_train, y_vals_class_test, rf_seed)
+
     print(datetime.now() - starting_time)
 
     # Calculate outlier rates
@@ -333,39 +335,48 @@ def main():
     outlier_reg_rf_max = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_max))
     outlier_class_rf_max = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_max))
 
+    outlier_reg_knn_full = outlier_rate(norm_residual(y_vals_test, pred_reg_knn_full))
+    outlier_class_knn_full = outlier_rate(norm_residual(y_vals_class_test, pred_class_knn_full))
+    outlier_reg_rf_full = outlier_rate(norm_residual(y_vals_test, pred_reg_rf_full))
+    outlier_class_rf_full = outlier_rate(norm_residual(y_vals_class_test, pred_class_rf_full))
+
     # Compile error data frame
     # Fill Method, FillKVal, FillTime, FillRMSE, Prediction Method, k/tree_val, Class/Regress, Out_Rate, MSE/Acc
-    error_lists = [['kNN', knn_impute_k, knn_time, knn_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_knn, mse_reg_knn_knn], 
-        ['MICE', "", mice_time, mice_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mice, mse_reg_knn_mice],  
-        ['GAIN', "", gain_time, gain_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_gain, mse_reg_knn_gain],  
-        ['Mean', "", mean_time, mean_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mean, mse_reg_knn_mean],  
-        ['Median', "", median_time, median_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_median, mse_reg_knn_median],  
-        ['Min', "", min_time, min_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_min, mse_reg_knn_min],  
-        ['Max', "", max_time, max_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_max, mse_reg_knn_max],  
+    error_lists = [['kNN', knn_impute_k, str(knn_time.total_seconds()), knn_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_knn, mse_reg_knn_knn], 
+        ['MICE', "", str(mice_time.total_seconds()), mice_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mice, mse_reg_knn_mice],  
+        ['GAIN', "", str(gain_time.total_seconds()), gain_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_gain, mse_reg_knn_gain],  
+        ['Mean', "", str(mean_time.total_seconds()), mean_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_mean, mse_reg_knn_mean],  
+        ['Median', "", str(median_time.total_seconds()), median_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_median, mse_reg_knn_median],  
+        ['Min', "", str(min_time.total_seconds()), min_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_min, mse_reg_knn_min],  
+        ['Max', "", str(max_time.total_seconds()), max_rmse, "kNN", best_k_reg, "Regression", outlier_reg_knn_max, mse_reg_knn_max],  
+        ['Full', "", "", "", "kNN", best_k_reg, "Regression", outlier_reg_knn_full, mse_reg_knn_full],  
 
-        ['kNN', knn_impute_k, knn_time, knn_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_knn, mse_class_knn_knn],  
-        ['MICE', "", mice_time, mice_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mice, mse_class_knn_mice],  
-        ['GAIN', "", gain_time, gain_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_gain, mse_class_knn_gain],  
-        ['Mean', "", mean_time, mean_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mean, mse_class_knn_mean],  
-        ['Median', "", median_time, median_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_median, mse_class_knn_median],  
-        ['Min', "", min_time, min_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_min, mse_class_knn_min],  
-        ['Max', "", max_time, max_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_max, mse_class_knn_max], 
+        ['kNN', knn_impute_k, str(knn_time.total_seconds()), knn_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_knn, mse_class_knn_knn],  
+        ['MICE', "", str(mice_time.total_seconds()), mice_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mice, mse_class_knn_mice],  
+        ['GAIN', "", str(gain_time.total_seconds()), gain_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_gain, mse_class_knn_gain],  
+        ['Mean', "", str(mean_time.total_seconds()), mean_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_mean, mse_class_knn_mean],  
+        ['Median', "", str(median_time.total_seconds()), median_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_median, mse_class_knn_median],  
+        ['Min', "", str(min_time.total_seconds()), min_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_min, mse_class_knn_min],  
+        ['Max', "", str(max_time.total_seconds()), max_rmse, "kNN", best_k_class, "Classification", outlier_class_knn_max, mse_class_knn_max],  
+        ['Full', "", "", "", "kNN", best_k_class, "Classification", outlier_class_knn_full, mse_class_knn_full], 
 
-        ['kNN', knn_impute_k, knn_time, knn_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_knn, mse_reg_rf_knn],  
-        ['MICE', "", mice_time, mice_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mice, mse_reg_rf_mice],  
-        ['GAIN', "", gain_time, gain_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_gain, mse_reg_rf_gain],  
-        ['Mean', "", mean_time, mean_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mean, mse_reg_rf_mean],  
-        ['Median', "", median_time, median_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_median, mse_reg_rf_median],  
-        ['Min', "", min_time, min_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_min, mse_reg_rf_min],  
-        ['Max', "", max_time, max_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_max, mse_reg_rf_max],
+        ['kNN', knn_impute_k, str(knn_time.total_seconds()), knn_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_knn, mse_reg_rf_knn],  
+        ['MICE', "", str(mice_time.total_seconds()), mice_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mice, mse_reg_rf_mice],  
+        ['GAIN', "", str(gain_time.total_seconds()), gain_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_gain, mse_reg_rf_gain],  
+        ['Mean', "", str(mean_time.total_seconds()), mean_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_mean, mse_reg_rf_mean],  
+        ['Median', "", str(median_time.total_seconds()), median_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_median, mse_reg_rf_median],  
+        ['Min', "", str(min_time.total_seconds()), min_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_min, mse_reg_rf_min],  
+        ['Max', "", str(max_time.total_seconds()), max_rmse, "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_max, mse_reg_rf_max], 
+        ['Full', "", "", "", "RandomForest", best_tree_reg, "Regression", outlier_reg_rf_full, mse_reg_rf_full],
 
-        ['kNN', knn_impute_k, knn_time, knn_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_knn, mse_class_rf_knn],  
-        ['MICE', "", mice_time, mice_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mice, mse_class_rf_mice],  
-        ['GAIN', "", gain_time, gain_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_gain, mse_class_rf_gain],  
-        ['Mean', "", mean_time, mean_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mean, mse_class_rf_mean],  
-        ['Median', "", median_time, median_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_median, mse_class_rf_median],  
-        ['Min', "", min_time, min_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_min, mse_class_rf_min],  
-        ['Max', "", max_time, max_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_max, mse_class_rf_max]]
+        ['kNN', knn_impute_k, str(knn_time.total_seconds()), knn_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_knn, mse_class_rf_knn],  
+        ['MICE', "", str(mice_time.total_seconds()), mice_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mice, mse_class_rf_mice],  
+        ['GAIN', "", str(gain_time.total_seconds()), gain_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_gain, mse_class_rf_gain],  
+        ['Mean', "", str(mean_time.total_seconds()), mean_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_mean, mse_class_rf_mean],  
+        ['Median', "", str(median_time.total_seconds()), median_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_median, mse_class_rf_median],  
+        ['Min', "", str(min_time.total_seconds()), min_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_min, mse_class_rf_min],  
+        ['Max', "", str(max_time.total_seconds()), max_rmse, "RandomForest", best_tree_class, "Classification", outlier_class_rf_max, mse_class_rf_max],  
+        ['Full', "", "", "", "RandomForest", best_tree_class, "Classification", outlier_class_rf_full, mse_class_rf_full]]
 
     error_frame = pd.DataFrame(error_lists, columns=["FillMethod", "FillKVal", "FillTime", "FillRMSE", "PredictMethod", "BestK_TreeVal", "Class/Regress", "OutlierRate", "MSE/Accuracy"])
     
@@ -455,6 +466,32 @@ def main():
     plot_data(y_vals_class_test, pred_class_knn_max, file_name="pred_class_knn_max.pdf")
     plot_data(y_vals_test, pred_reg_rf_max, file_name="pred_reg_rf_max.pdf")
     plot_data(y_vals_class_test, pred_class_rf_max, file_name="pred_class_rf_max.pdf")
+
+    np.savetxt('pred_reg_knn_full.csv', pred_reg_knn_full, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_knn_full.csv', pred_class_knn_full, fmt="%f", delimiter=",")
+    np.savetxt('pred_reg_rf_full.csv', pred_reg_rf_full, fmt="%f", delimiter=",")
+    np.savetxt('pred_class_rf_full.csv', pred_class_rf_full, fmt="%f", delimiter=",")
+    
+    plot_data(y_vals_test, pred_reg_knn_full, file_name="pred_reg_knn_full.pdf")
+    plot_data(y_vals_class_test, pred_class_knn_full, file_name="pred_class_knn_full.pdf")
+    plot_data(y_vals_test, pred_reg_rf_full, file_name="pred_reg_rf_full.pdf")
+    plot_data(y_vals_class_test, pred_class_rf_full, file_name="pred_class_rf_full.pdf")
+
+
+    np.savetxt('x_vals_mice.csv', x_vals_mice, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_gain.csv', x_vals_gain, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_knn.csv', x_vals_knn, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_mean.csv', x_vals_mean, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_median.csv', x_vals_median, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_max.csv', x_vals_max, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_min.csv', x_vals_min, fmt="%f", delimiter=",")
+
+    np.savetxt('missing_mask.csv', missing_mask, fmt="%f", delimiter=",")
+    np.savetxt('x_vals_test.csv', x_vals_test, fmt="%f", delimiter=",")
+
+    np.savetxt('bin_edges.csv', bin_edges, fmt="%f", delimiter=",")
+    np.savetxt('bin_median.csv', bin_median, fmt="%f", delimiter=",")
+     
 
 
 if __name__ == "__main__":

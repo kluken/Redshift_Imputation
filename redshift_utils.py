@@ -170,6 +170,7 @@ def plot_data(spec_z, pred_z, file_name=None, error = None, kVal = None):
         plt.clf()
     else:
         plt.show()
+    plt.close(fig)
 
 
 def kNN(k_val, xValsTrain, xValsTest, yValsTrain, yValsTest, distType):
